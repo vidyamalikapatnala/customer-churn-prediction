@@ -20,133 +20,66 @@ def load_model():
     df = pd.read_csv("churn.csv")
     df.columns = df.columns.str.strip()
 
-    required = [
-        "tenure",
-        "MonthlyCharges",
-        "TotalCharges",
-        "Contract",
-        "InternetService",
-        "Churn"
-    ]
+    # TotalCharges lo unna space / empty values ni number ga marchadam
+    df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+    df = df.dropna()
 
-    missing = [col for col in required if col not in df.columns]
-    if missing:
-        raise ValueError(
-            "Missing dataset columns: " + ", ".join(missing)
-        )
+    X = df[["tenure", "MonthlyCharges", "TotalCharges", "Contract", "InternetService"]]
+    y = df["Churn"].map({"Yes": 1, "No": 0})
+    y = y.dropna()
+    X = X.loc[y.index]
 
-    df["TotalCharges"] = pd.to_numeric(
-        df["TotalCharges"], errors="coerce"
-    )
-    df["Churn"] = df["Churn"].astype(str).str.strip()
-
-    df = df[df["Churn"].isin(["Yes", "No"])].copy()
-
-    if df["Churn"].nunique() != 2:
-        raise ValueError("Churn column must contain Yes and No values.")
-
-    features = [
-        "tenure",
-        "MonthlyCharges",
-        "TotalCharges",
-        "Contract",
-        "InternetService"
-    ]
-
-    X = df[features]
-    y = df["Churn"].map({"No": 0, "Yes": 1})
-
-    numeric_features = [
-        "tenure", "MonthlyCharges", "TotalCharges"
-    ]
+    numeric_features = ["tenure", "MonthlyCharges", "TotalCharges"]
     categorical_features = ["Contract", "InternetService"]
 
-    numeric_pipeline = Pipeline([
-        ("imputer", SimpleImputer(strategy="median"))
-    ])
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", SimpleImputer(strategy="median"), numeric_features),
+            ("cat", Pipeline(steps=[
+                ("imputer", SimpleImputer(strategy="most_frequent")),
+                ("onehot", OneHotEncoder(handle_unknown="ignore"))
+            ]), categorical_features)
+        ])
 
-    categorical_pipeline = Pipeline([
-        ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("encoder", OneHotEncoder(handle_unknown="ignore"))
-    ])
-
-    preprocessor = ColumnTransformer([
-        ("numeric", numeric_pipeline, numeric_features),
-        ("categorical", categorical_pipeline, categorical_features)
-    ])
-
-    model = Pipeline([
+    model = Pipeline(steps=[
         ("preprocessor", preprocessor),
-        ("classifier", RandomForestClassifier(
-            n_estimators=100,
-            random_state=42,
-            class_weight="balanced"
-        ))
+        ("classifier", RandomForestClassifier(n_estimators=100, random_state=42))
     ])
 
     model.fit(X, y)
     return model
 
-
 try:
     model = load_model()
-
-    st.subheader("Enter Customer Details")
-
-    tenure = st.number_input(
-        "Tenure (months)", min_value=0, max_value=100, value=12
-    )
-
-    monthly_charges = st.number_input(
-        "Monthly Charges", min_value=0.0, value=70.0, step=5.0
-    )
-
-    total_charges = st.number_input(
-        "Total Charges", min_value=0.0, value=840.0, step=10.0
-    )
-
-    contract = st.selectbox(
-        "Contract",
-        ["Month-to-month", "One year", "Two year"]
-    )
-
-    internet = st.selectbox(
-        "Internet Service",
-        ["DSL", "Fiber optic", "No"]
-    )
-
-    if st.button("Predict Churn", type="primary"):
-        customer = pd.DataFrame([{
-            "tenure": tenure,
-            "MonthlyCharges": monthly_charges,
-            "TotalCharges": total_charges,
-            "Contract": contract,
-            "InternetService": internet
-        }])
-
-        prediction = model.predict(customer)[0]
-        probability = model.predict_proba(customer)[0][1]
-
-        st.subheader("Prediction Result")
-
-        if prediction == 1:
-            st.error("Customer may leave the company.")
-        else:
-            st.success("Customer is predicted to stay.")
-
-        st.metric(
-            "Estimated Churn Probability",
-            f"{probability * 100:.2f}%"
-        )
-
-        st.caption(
-            "This is a prediction, not a guarantee."
-        )
-
+    st.success("Model loaded successfully!")
 except FileNotFoundError:
-    st.error(
-        "churn.csv file not found. Upload churn.csv "
-        "into the same folder as app.py."
-    )
-except Exception as error:
-    st.error(f"Unable to run the project: {error}")
+    st.error("❌ churn.csv file not found! GitHub lo churn.csv upload chey.")
+    st.stop()
+except Exception as e:
+    st.error(f"❌ Error: {e}")
+    st.stop()
+
+st.subheader("Enter Customer Details")
+
+tenure = st.slider("Tenure (months)", 0, 72, 12)
+monthly = st.number_input("Monthly Charges", min_value=0.0, value=70.0)
+total = st.number_input("Total Charges", min_value=0.0, value=800.0)
+contract = st.selectbox("Contract", ["Month-to-month", "One year", "Two year"])
+internet = st.selectbox("Internet Service", ["DSL", "Fiber optic", "No"])
+
+if st.button("Predict"):
+    input_data = pd.DataFrame([{
+        "tenure": tenure,
+        "MonthlyCharges": monthly,
+        "TotalCharges": total,
+        "Contract": contract,
+        "InternetService": internet
+    }])
+
+    prediction = model.predict(input_data)[0]
+    proba = model.predict_proba(input_data)[0]
+
+    if prediction == 1:
+        st.error(f"⚠️ Customer may CHURN! Probability: {proba[1]*100:.2f}%")
+    else:
+        st.success(f"✅ Customer will STAY. Probability: {proba[0]*100:.2f}%")
